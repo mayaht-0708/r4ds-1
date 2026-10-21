@@ -1,0 +1,8 @@
+---
+title: "Billboard Hot 100"
+author: "Mayah"
+format: html
+---
+
+## Introduction
+This is a data analysis of the Billboard Hot 100.
