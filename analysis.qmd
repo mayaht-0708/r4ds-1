@@ -1,8 +1,151 @@
 ---
 title: "Billboard Hot 100"
 author: "Mayah"
-format: html
+format: html 
+execute:
+  echo: false
 ---
 
 ## Introduction
 This is a data analysis of the Billboard Hot 100.
+
+
+```{r}
+#| message: false
+library(tidyverse)
+``` 
+
+```{r}
+#| cache: true
+billboard <- read_csv("data/billboard.csv", show_col_types = FALSE)
+```
+
+```{r}
+billboard |> 
+  select(artist, track, date.entered, wk1:wk4)
+```
+
+```{r}
+summary(billboard$date.entered)
+```
+
+```{r}
+ggplot(billboard, aes(x = wk1)) +
+  geom_histogram(binwidth = 10) +
+  labs(subtitle = paste("Number of values:", sum(!is.na(billboard$wk1))))
+```
+
+```{r}
+billboard |>
+  summarise(across(
+    c(wk1, wk4, wk10, wk20, wk40, wk76),
+    list(
+      present = \(x) sum(!is.na(x)),
+      missing = \(x) sum(is.na(x))
+    )
+  )) |>
+  pivot_longer(
+    everything(),
+    names_to = c("week", ".value"),
+    names_pattern = "(wk\\d+)_(present|missing)"
+  )
+```
+
+```{r}
+billboard_long <- billboard |>
+  pivot_longer(
+    cols = starts_with("wk"),
+    names_to = "week",
+    values_to = "rank"
+  ) |>
+  mutate(week = readr::parse_number(week))
+
+ggplot(
+  billboard_long,
+  aes(x = week, y = rank, group = interaction(artist, track))
+) +
+  geom_line(na.rm = TRUE) +
+  scale_y_reverse()
+```
+
+```{r}
+billboard_long |>
+  filter(!is.na(rank)) |>
+  group_by(artist, track) |>
+  filter(week == max(week)) |>
+  filter(week == 20) |>
+  ungroup() |>
+  summarise(
+    songs = n(),
+    ranked_below_50 = sum(rank > 50),
+    .groups = "drop"
+  )
+```
+
+```{r}
+song_summary <- billboard_long |>
+  filter(!is.na(rank)) |>
+  arrange(artist, track, week) |>
+  group_by(artist, track) |>
+  summarise(
+    first_rank = first(rank),
+    best_rank = min(rank),
+    first_week_at_best = min(week[rank == min(rank)]),
+    weeks_on_chart = n(),
+    .groups = "drop"
+  )
+
+song_summary
+```
+
+```{r}
+number_one_songs <- song_summary |>
+  filter(best_rank == 1)
+
+top_ten_songs <- song_summary |>
+  filter(best_rank <= 10)
+
+notable_songs <- bind_rows(
+  number_one_songs |>
+    slice_min(first_week_at_best, n = 1, with_ties = TRUE) |>
+    mutate(notable = "Fastest to No. 1"),
+  number_one_songs |>
+    slice_max(first_week_at_best, n = 1, with_ties = TRUE) |>
+    mutate(notable = "Slowest to No. 1"),
+  top_ten_songs |>
+    slice_max(weeks_on_chart, n = 1, with_ties = TRUE) |>
+    mutate(notable = "Longest chart run among top 10")
+) |>
+  select(notable, artist, track, first_rank, best_rank, first_week_at_best, weeks_on_chart)
+
+notable_songs
+```
+
+```{r}
+top_ten_plot_data <- billboard_long |>
+  filter(!is.na(rank)) |>
+  inner_join(top_ten_songs |> select(artist, track), by = c("artist", "track")) |>
+  left_join(
+    notable_songs |>
+      transmute(artist, track, highlight = paste(artist, track, sep = " - ")),
+    by = c("artist", "track")
+  ) |>
+  mutate(highlight = coalesce(highlight, "Other top-10 songs"))
+
+ggplot(
+  top_ten_plot_data,
+  aes(x = week, y = rank, group = interaction(artist, track), color = highlight)
+) +
+  geom_line() +
+  scale_y_reverse() +
+  scale_color_manual(
+    values = c(
+      "Other top-10 songs" = "gray70",
+      setNames(
+        scales::hue_pal()(nrow(notable_songs)),
+        paste(notable_songs$artist, notable_songs$track, sep = " - ")
+      )
+    )
+  ) +
+  labs(color = "Song")
+```
